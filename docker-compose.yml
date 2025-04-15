@@ -1,0 +1,127 @@
+services:
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ 'CMD', 'pg_isready' ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    image: REDACTED:5050/team-36/backend:master
+    ports:
+      - '8080:8080'
+    networks:
+      - default
+      - minio
+    environment:
+      SERVER_PORT: 8080
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: ${S3_REGION}
+      POSTGRES_JDBC_URL: ${POSTGRES_JDBC_URL}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ 'CMD', 'curl', '-f', 'http://localhost:8080/actuator/health' ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: 'redis:latest'
+    healthcheck:
+      test: [ 'CMD', 'redis-cli', '--raw', 'incr', 'ping' ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - '8001:9090'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.route-prefix=/prometheus'
+      - '--web.external-url=http://REDACTED/prometheus/'
+    healthcheck:
+      test: [ 'CMD', 'wget', '-q', '-O', '-', 'http://localhost:9090/prometheus/-/healthy' ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - 'prometheus-data:/prometheus'
+      - './config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-enterprise
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SERVER_ROOT_URL: https://prod-team-36-m2st0u6v.REDACTED/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: true
+    ports:
+      - '8002:3000'
+    volumes:
+      - 'grafana-data:/var/lib/grafana'
+      - './config/grafana/provisioning:/etc/grafana/provisioning:ro'
+    healthcheck:
+      test: [ 'CMD', 'curl', '-f', 'http://localhost:3000/api/health' ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ACCESS_KEY: ${S3_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${S3_SECRET_KEY}
+    volumes:
+      - 'minio-data:/data'
+    healthcheck:
+      test: [ 'CMD', 'curl', '--silent', '--output', '/dev/null', '--write-out', '%{http_code}', 'http://localhost:9000' ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      minio:
+        ipv4_address: REDACTED
+    command: server /data
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  grafana-data:
+  prometheus-data:
+  minio-data:
+
+networks:
+  minio:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: REDACTED/24
